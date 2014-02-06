@@ -18,27 +18,29 @@ class GuestUserPlugin extends Omeka_Plugin_AbstractPlugin
         'config',
         'config_form',
         'before_save_user',
-        'initialize'
+        'initialize',
+        'users_browse_sql'
     );
 
     protected $_filters = array(
         'public_navigation_main',
         'public_show_admin_bar',
-        'guest_user_widgets'       
+        'guest_user_widgets',
+        'admin_navigation_main'
     );
 
-    
+
     /**
      * Add the translations.
      */
     public function hookInitialize()
     {
         add_translation_source(dirname(__FILE__) . '/languages');
-    }    
-    
+    }
+
     public function setUp()
     {
-       
+
         parent::setUp();
         require_once(GUEST_USER_PLUGIN_DIR . '/libraries/GuestUser_ControllerPlugin.php');
         Zend_Controller_Front::getInstance()->registerPlugin(new GuestUser_ControllerPlugin);
@@ -58,8 +60,8 @@ class GuestUserPlugin extends Omeka_Plugin_AbstractPlugin
                 ) ENGINE=MyISAM CHARSET=utf8 COLLATE=utf8_unicode_ci;
                 ";
 
-        $db->query($sql);        
-        
+        $db->query($sql);
+
         //if plugin was uninstalled/reinstalled, reactivate the guest users
         $guestUsers = $this->_db->getTable('User')->findBy(array('role'=>'guest'));
         //skip activation emails when reinstalling
@@ -70,8 +72,8 @@ class GuestUserPlugin extends Omeka_Plugin_AbstractPlugin
                 $user->save();
             }
             set_option('guest_user_skip_activation_email', false);
-        }     
-        
+        }
+
         set_option('guest_user_login_text', __('Login'));
         set_option('guest_user_register_text', __('Register'));
     }
@@ -93,7 +95,7 @@ class GuestUserPlugin extends Omeka_Plugin_AbstractPlugin
     }
 
     public function hookConfig($args)
-    {        
+    {
         $post = $args['post'];
         foreach($post as $option=>$value) {
             set_option($option, $value);
@@ -119,12 +121,12 @@ class GuestUserPlugin extends Omeka_Plugin_AbstractPlugin
     }
     public function hookPublicHead($args)
     {
-        queue_css_file('guest-user');        
+        queue_css_file('guest-user');
         queue_js_file('guest-user');
     }
 
     public function hookPublicHeader($args)
-    {        
+    {
         $html = "<div id='guest-user-register-info'>";
         $user = current_user();
         if(!$user) {
@@ -153,7 +155,33 @@ class GuestUserPlugin extends Omeka_Plugin_AbstractPlugin
                 } catch (Exception $e) {
                     _log($e);
                 }
-            }            
+            }
+        }
+    }
+
+    public function hookUsersBrowseSql($args)
+    {
+        $select = $args['select'];
+        $params = $args['params'];
+
+        if(isset($params['sort_field']) && $params['sort_field'] == 'added') {
+            $db = get_db();
+            $sortDir = 'ASC';
+            if (array_key_exists('sort_dir', $params)) {
+                $sortDir = trim($params['sort_dir']);
+
+                if ($sortDir === 'a') {
+                    $dir = 'ASC';
+                } else if ($sortDir === 'd') {
+                    $dir = 'DESC';
+                }
+            } else {
+                $dir = 'ASC';
+            }
+            $uaAlias = $db->getTable('UsersActivations')->getTableAlias();
+            $select->join(array($uaAlias => $db->UsersActivations),
+                            "$uaAlias.user_id = users.id");
+            $select->order("$uaAlias.added $dir");
         }
     }
 
@@ -162,8 +190,14 @@ class GuestUserPlugin extends Omeka_Plugin_AbstractPlugin
         return false;
     }
     
-    public function filterPublicNavigationMain($navLinks)
+    public function filterAdminNavigationMain($navLinks)
     {
+        $navLinks['Guest User'] = array('label' => __("Guest Users"),
+                                        'uri' => url("guest-user/user/browse?role=guest"));
+        return $navLinks;
+    }
+
+    public function filterPublicNavigationMain($navLinks)
         //Clobber the default admin link if user is guest
         $user = current_user();
         if($user) {
@@ -197,10 +231,7 @@ class GuestUserPlugin extends Omeka_Plugin_AbstractPlugin
             'uri' => url('guest-user/user/register'),
         );
         return $navLinks;
-
-        
     }
-    
 
     public function filterGuestUserWidgets($widgets)
     {
@@ -219,13 +250,16 @@ class GuestUserPlugin extends Omeka_Plugin_AbstractPlugin
     {
         $email = $record->email;
         $name = $record->name;
- 
+
         $siteTitle  = get_option('site_title');
         $subject = __("Your %s account", $siteTitle);
-        $body = __("An admin has made your account active. You can now log in to %s with your password", "<a href='" . WEB_ROOT . "'>$siteTitle</a>");
+        $body = "<p>";
+        $body .= __("An admin has made your account on %s active. You can now log in to with your password at this link:", $siteTitle );
+        $body .= "</p>";
+        $body .= "<p><a href='" . WEB_ROOT . "/users/login'>$siteTitle</a></p>";
         $from = get_option('administrator_email');
         $mail = new Zend_Mail();
-        $mail->setBodyText($body);
+        $mail->setBodyHtml($body);
         $mail->setFrom($from, "$siteTitle Administrator");
         $mail->addTo($email, $name);
         $mail->setSubject($subject);
