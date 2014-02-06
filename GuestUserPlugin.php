@@ -198,6 +198,7 @@ class GuestUserPlugin extends Omeka_Plugin_AbstractPlugin
     }
 
     public function filterPublicNavigationMain($navLinks)
+    {
         //Clobber the default admin link if user is guest
         $user = current_user();
         if($user) {
